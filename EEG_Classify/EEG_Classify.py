@@ -1,5 +1,4 @@
-﻿from pyexpat import features
-import numpy
+﻿import numpy
 import EA
 import CSP
 import torch
@@ -7,10 +6,16 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, random_split
 from sklearn.metrics import accuracy_score
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.svm import SVC
+from scipy.fft import fft
 import random
+import csv
 
 FILTER_COUNT = 10
-RANDOM_SEED = 1919810
+RANDOM_SEED = 42
 
 random.seed(RANDOM_SEED)
 numpy.random.seed(RANDOM_SEED) 
@@ -64,6 +69,7 @@ for value in trainDataDictEA.values():
     labels.update(y for y in value[1])
 
 CSPFilteredData = []
+filtersList = []
 for subject in trainDataDictEA:
     trainDataLabelDict = {} # 通过字典，将每个trail按照y标签分类
     for trail in range(0, len(trainDataDictEA[subject][1])): # 取y的值作为键
@@ -73,6 +79,7 @@ for subject in trainDataDictEA:
         else:
             trainDataLabelDict[labelKey].append(trainDataDictEA[subject][0][trail]) # 若存在则向列表加入
     filters = CSP.CSP(trainDataLabelDict) # 可取W前n行与X相乘，则将数据降维，类似PCA
+    filtersList.append(filters)
     for key in trainDataDictEA:
         data_X, data_y = trainDataDictEA[key]
         if len(trainDataLabelDict) == 2:
@@ -86,8 +93,9 @@ trainDataDictCSP = dict(zip(fileNames, CSPFilteredData))
 '''
 '''
 
-# 保留序列使用LSTM
 '''
+# 保留序列使用LSTM
+
 # 分类器设计
 import torch
 import torch.nn as nn
@@ -225,7 +233,7 @@ torch.save({
 '''
 
 # 提取log特征
-
+''
 # 加载数据
 data_X = []
 data_y = []
@@ -369,18 +377,14 @@ torch.save(model, 'model\\FCmodel.mdl')
 
 '''
 
-import numpy as np
-from sklearn.datasets import make_classification
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
-from sklearn.svm import SVC
+# SVM实现
 
-# 加载数据和准备（这里使用之前的 logFeature 和 data_y）
 data_X = logFeature
 data_y = data_y
 
 # 划分训练集和测试集
-X_train, X_val, y_train, y_val = train_test_split(data_X, data_y, test_size=0.2)
+#X_train, X_val, y_train, y_val = train_test_split(data_X, data_y, test_size=0.2)
+X_train, y_train = data_X, data_y
 
 svm_model = SVC(kernel='linear', C=1.0)
 
@@ -388,9 +392,71 @@ svm_model = SVC(kernel='linear', C=1.0)
 svm_model.fit(X_train, y_train)
 
 # 在验证集上进行预测
-val_preds = svm_model.predict(X_val)
+TRAIL_NUM = 200
+X_val = [data_X[i * TRAIL_NUM:(i + 1) * TRAIL_NUM] for i in range(len(fileNames))]
+y_val = [data_y[i * TRAIL_NUM:(i + 1) * TRAIL_NUM] for i in range(len(fileNames))]
+for i in range(len(fileNames)):
+    val_preds = svm_model.predict(X_val[i])
+    val_acc = accuracy_score(y_val[i], val_preds)
+    print(fileNames[i] + f' Validation Accuracy: {val_acc:.4f}')
+    print(classification_report(y_val[i], val_preds))
 
-# 计算验证集准确率
-val_acc = accuracy_score(y_val, val_preds)
-print(f'Validation Accuracy: {val_acc:.4f}')
-print(classification_report(y_val, val_preds))
+
+# 预测剩余标签
+
+# 读取test数据
+
+testDataList = []
+fileNames = ['s5.npz', 's6.npz', 's7.npz']
+for fileName in fileNames:
+    with numpy.load('./Data\\test\\' + fileName) as data:
+        data_X = data['X']
+        testDataList.append(data_X)
+
+# 欧拉对齐
+testDataListEA = []
+for testData in testDataList:
+    data_X = EA.EA(testData)
+    testDataListEA.append(data_X)
+
+# 提取CSP特征 (这里有问题，因为CSP需要标签，这里只能使用之前的CSP滤波器，严格意义上说是不正确的)
+Test_Data = []
+for testData in testDataListEA:
+    if len(trainDataLabelDict) == 2:
+        data_X = numpy.einsum('ij,kjl->kil', numpy.concatenate((filters[0][:FILTER_COUNT], filters[0][-FILTER_COUNT:]), axis=0), testData)
+    else:
+        for aFilter in filters:
+            pass
+    Test_Data.append(data_X.real)
+
+testLogFeature = numpy.zeros((data_X.shape[0] * len(Test_Data), data_X.shape[1]))
+i = 0
+for subject in Test_Data:
+    for trail in subject:
+        testLogFeature[i] = numpy.log10(numpy.diag(trail @ trail.T) / numpy.trace(trail @ trail.T))
+        i += 1
+    
+
+# 使用模型预测
+prediction = svm_model.predict(testLogFeature)
+
+chunk_size = len(prediction) // len(fileNames)
+chunks = [prediction[i * chunk_size:(i + 1) * chunk_size] for i in range(len(fileNames))]
+with open('output.csv', 'w', newline='') as csvfile:
+    csvwriter = csv.writer(csvfile)
+    headers = fileNames
+    csvwriter.writerow(headers)
+    for row in numpy.array(chunks).T:
+        csvwriter.writerow(row)
+'''        
+with open('11.csv', 'w', newline='') as csvfile:
+    csvwriter = csv.writer(csvfile)
+    headers = trainDataDictRaw.keys()
+    csvwriter.writerow(headers)
+    data_y = []
+    for key in trainDataDictRaw:
+        data_y.append(trainDataDictRaw[key][1])
+        
+    for row in numpy.array(data_y).T:
+        csvwriter.writerow(row)
+'''
