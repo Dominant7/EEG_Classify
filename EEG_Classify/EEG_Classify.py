@@ -250,7 +250,7 @@ for trail in data_X:
     logFeature[i] = numpy.log10(numpy.diag(trail @ trail.T) / numpy.trace(trail @ trail.T))
     i += 1
     
-'''
+
 '''
 # 分类器
 
