@@ -231,7 +231,6 @@ torch.save({
     'optimizer_state_dict': optimizer.state_dict(),
 }, 'lstm_classifier_checkpoint.pth')
 '''
-
 # 提取log特征
 ''
 # 加载数据
@@ -251,6 +250,7 @@ for trail in data_X:
     logFeature[i] = numpy.log10(numpy.diag(trail @ trail.T) / numpy.trace(trail @ trail.T))
     i += 1
     
+'''
 '''
 # 分类器
 
